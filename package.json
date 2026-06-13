@@ -1,0 +1,49 @@
+{
+  "name": "@tlay/hashanchor-client",
+  "version": "1.0.0",
+  "description": "Official client SDK for HashAnchor — anchor data hashes to blockchains and verify inclusion receipts.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/TLAY-IO/hashanchor",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TLAY-IO/hashanchor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TLAY-IO/hashanchor/issues"
+  },
+  "keywords": [
+    "hashanchor",
+    "tlay",
+    "blockchain",
+    "anchoring",
+    "merkle",
+    "timestamping",
+    "proof-of-existence"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md", "LICENSE", "NOTICE"],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "js-sha3": "^0.9.3",
+    "merkletreejs": "^0.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
