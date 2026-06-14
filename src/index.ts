@@ -179,15 +179,19 @@ const USDC_BY_NETWORK: Record<string, string> = {
 
 /**
  * Circle Gateway (GatewayWallet) contract per network — the EIP-712
- * `verifyingContract` for the GatewayWalletBatched signing domain. Testnets
- * share one deployment; mainnets another. Mirrors the server config.
+ * `verifyingContract` for the GatewayWalletBatched signing domain.
+ * Mirrors the server config exactly. NOTE the grouping is by chain family,
+ * not testnet/mainnet: Arc uses the same precompile-style address on BOTH its
+ * testnet and mainnet (0x0077777d…), as does Base Sepolia; Base and Polygon
+ * mainnet use the standard 0x77777777… deployment. (Verified against the
+ * server's config.ts arc-mainnet entry — do not "fix" Arc Mainnet to 0x77777777.)
  */
 const GATEWAY_BY_NETWORK: Record<string, string> = {
   "eip155:5042002": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9", // Arc Testnet
-  "eip155:5042": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9", // Arc Mainnet
+  "eip155:5042": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9", // Arc Mainnet (same as Arc Testnet — Arc-specific)
   "eip155:84532": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9", // Base Sepolia
-  "eip155:8453": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE", // Base
-  "eip155:137": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE", // Polygon
+  "eip155:8453": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE", // Base mainnet
+  "eip155:137": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE", // Polygon mainnet
 };
 
 function toBase64(s: string): string {
