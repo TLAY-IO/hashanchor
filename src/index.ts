@@ -8,7 +8,13 @@ export { verifyReceiptProof } from "./receipt.js";
 import type { AnchorReceipt } from "./types.js";
 
 export interface HashAnchorConfig {
-  apiKey: string;
+  /**
+   * API key (ha_ prefix) for authenticated endpoints (anchoring, quota, status).
+   * Optional: the public endpoints — `settle()`, `verify()`, `getReceipt()`,
+   * `getChains()` — work without a key. A settle-only client (e.g. an x402
+   * settlement worker) can be constructed with no apiKey at all.
+   */
+  apiKey?: string;
   baseUrl?: string;
 }
 
@@ -102,6 +108,130 @@ export interface ProvisionResult {
   };
 }
 
+// ── x402 settle (device-to-device nanopayments) ──
+
+/**
+ * A single flat payment proof as emitted on the wire (BLE 0xEE04 / MQTT).
+ * This is the frozen format produced by the BoAT buyer engine — fields are
+ * carried verbatim end-to-end; only the SDK reshapes them for the facilitator.
+ *
+ * IMPORTANT: `value` and `nonce` are strings and MUST stay strings the whole way.
+ * Never round-trip them through a JS `number` — a uint256 value or 32-byte nonce
+ * exceeds 2^53 and silently loses precision, producing a signature that recovers
+ * to the wrong payer and a silent Circle rejection.
+ */
+export interface SettleProof {
+  /** "0x" + r(32B) + s(32B) + v(1B); v is the last byte, ∈ {27, 28}. */
+  sig: string;
+  from: string;
+  to: string;
+  /** Decimal string of atomic units (µUSDC). Never a number. */
+  value: string;
+  validAfter: number | string;
+  validBefore: number | string;
+  /** "0x" + 64 hex. Opaque — never a number. */
+  nonce: string;
+  /** Per-stream slice index; used only for client-side idempotency. */
+  slice_id?: number;
+}
+
+/** A batch of proofs to settle on one network (e.g. one MQTT settle message). */
+export interface SettleEnvelope {
+  sid: string;
+  batchIdx: number;
+  /** CAIP-2 network, e.g. "eip155:5042002" (Arc Testnet). */
+  network: string;
+  /** USDC asset address; defaults to the canonical USDC for `network`. */
+  asset?: string;
+  proofs: SettleProof[];
+}
+
+/** The Circle-native request body POSTed to `/v1/x402/settle`. */
+export interface SettleRequest {
+  x402Version: number;
+  paymentPayload: string;
+  paymentRequirements: {
+    network: string;
+    scheme?: string;
+    asset?: string;
+    payTo?: string;
+    extra?: Record<string, unknown>;
+  };
+}
+
+export interface SettleResult {
+  success: boolean;
+  payer?: string;
+  transaction?: string;
+  network?: string;
+  errorReason?: string | null;
+  chainId?: number;
+}
+
+/** Canonical USDC contract per supported network (mirrors the server config). */
+const USDC_BY_NETWORK: Record<string, string> = {
+  "eip155:5042002": "0x3600000000000000000000000000000000000000", // Arc Testnet
+  "eip155:5042": "0x3600000000000000000000000000000000000000", // Arc Mainnet
+  "eip155:84532": "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // Base Sepolia
+  "eip155:8453": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // Base
+  "eip155:137": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", // Polygon
+};
+
+function toBase64(s: string): string {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(s, "utf-8").toString("base64");
+  }
+  // Browser fallback (UTF-8 safe).
+  return btoa(
+    encodeURIComponent(s).replace(/%([0-9A-F]{2})/g, (_, h) =>
+      String.fromCharCode(parseInt(h, 16))
+    )
+  );
+}
+
+/**
+ * Reshape one flat wire proof into the Circle-native settle request:
+ * flat → nested `payload.authorization.*`, `sig` → `payload.signature`,
+ * `validAfter`/`validBefore` stringified, `value`/`nonce` carried verbatim,
+ * `slice_id` moved into `paymentRequirements.extra.sliceId`, and base64-encoded.
+ *
+ * Exported for callers who want the request without sending it (testing,
+ * custom transports). Most callers should use `HashAnchor.settle()`.
+ */
+export function buildSettlePayload(
+  proof: SettleProof,
+  opts: { network: string; asset?: string }
+): SettleRequest {
+  const nano = {
+    x402Version: 2,
+    payload: {
+      signature: proof.sig,
+      authorization: {
+        from: proof.from,
+        to: proof.to,
+        value: String(proof.value),
+        validAfter: String(proof.validAfter),
+        validBefore: String(proof.validBefore),
+        nonce: proof.nonce,
+      },
+    },
+  };
+  const paymentRequirements: SettleRequest["paymentRequirements"] = {
+    network: opts.network,
+    scheme: "exact",
+    asset: opts.asset ?? USDC_BY_NETWORK[opts.network],
+    payTo: proof.to,
+  };
+  if (proof.slice_id !== undefined) {
+    paymentRequirements.extra = { sliceId: proof.slice_id };
+  }
+  return {
+    x402Version: 2,
+    paymentPayload: toBase64(JSON.stringify(nano)),
+    paymentRequirements,
+  };
+}
+
 export class HashAnchorError extends Error {
   constructor(
     message: string,
@@ -117,8 +247,8 @@ export class HashAnchor {
   private apiKey: string;
   private baseUrl: string;
 
-  constructor(config: HashAnchorConfig) {
-    this.apiKey = config.apiKey;
+  constructor(config: HashAnchorConfig = {}) {
+    this.apiKey = config.apiKey ?? "";
     this.baseUrl = (config.baseUrl ?? "https://hashanchor.xid.network").replace(
       /\/$/,
       ""
@@ -157,6 +287,14 @@ export class HashAnchor {
     path: string,
     body?: unknown
   ): Promise<T> {
+    if (!this.apiKey) {
+      throw new HashAnchorError(
+        `${method} ${path} requires an API key. ` +
+          `Construct HashAnchor with { apiKey }, or use a public method ` +
+          `(settle, verify, getReceipt, getChains).`,
+        401
+      );
+    }
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
     };
@@ -252,6 +390,71 @@ export class HashAnchor {
 
   async getChains(): Promise<ChainInfo[]> {
     return this.requestPublic("GET", "/v1/chains");
+  }
+
+  // ── x402 settle (public stateless facilitator relay) ──
+
+  /**
+   * Settle a batch of nanopayment proofs via HashAnchor's public
+   * `POST /v1/x402/settle` facilitator (no API key required).
+   *
+   * Each proof is reshaped (see `buildSettlePayload`) and relayed to the Circle
+   * Gateway; HashAnchor holds no key, connects to no RPC, and pays no gas. The
+   * returned array is positionally aligned with `envelope.proofs`.
+   *
+   * A `success:false` result with `errorReason` (e.g. `nonce_already_used`,
+   * `insufficient_balance`) is a real settlement outcome, NOT a thrown error —
+   * `nonce_already_used` in particular is the idempotent rejection of a proof
+   * that already settled (expected under at-least-once MQTT delivery), so
+   * de-duplicate on `(payer, nonce)` rather than treating it as a failure.
+   * A network/transport fault on a single proof is captured as a
+   * `success:false` result too, so one bad proof never sinks the batch.
+   */
+  async settle(envelope: SettleEnvelope): Promise<SettleResult[]> {
+    const results: SettleResult[] = [];
+    for (const proof of envelope.proofs) {
+      const req = buildSettlePayload(proof, {
+        network: envelope.network,
+        asset: envelope.asset,
+      });
+      try {
+        results.push(await this.settleOne(req));
+      } catch (err) {
+        results.push({
+          success: false,
+          errorReason:
+            err instanceof Error ? err.message : "settle request failed",
+          network: envelope.network,
+        });
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Relay a single pre-built settle request. `200` → `success:true`; `402` →
+   * `success:false` with `errorReason` (a valid settlement outcome, returned
+   * not thrown). Only genuine faults (400 bad request, 5xx, network) throw.
+   */
+  private async settleOne(req: SettleRequest): Promise<SettleResult> {
+    const res = await fetch(`${this.baseUrl}/v1/x402/settle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+    const body = (await res.json().catch(() => null)) as SettleResult | null;
+    if (res.status === 200 || res.status === 402) {
+      return (
+        body ?? { success: res.status === 200, network: req.paymentRequirements.network }
+      );
+    }
+    throw new HashAnchorError(
+      (body as any)?.errorReason ??
+        (body as any)?.error ??
+        `Settle failed (${res.status})`,
+      res.status,
+      body
+    );
   }
 }
 
