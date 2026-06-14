@@ -84,6 +84,28 @@ test("extra carries the GatewayWalletBatched signing domain", () => {
   );
 });
 
+test("payload + requirements carry the Circle-required fields", () => {
+  // Circle's batched facilitator rejects with "Invalid request: ...resource:
+  // Required, ...accepted: Required, ...amount: Required, ...maxTimeoutSeconds:
+  // Required" if any are missing. Verified against a live settle.
+  const req = buildSettlePayload(PROOF, { network: NETWORK });
+  // top-level requirements
+  assert.equal(req.paymentRequirements.amount, "9007199254740993");
+  assert.equal(req.paymentRequirements.maxTimeoutSeconds, 345600);
+  // inside the base64 payload
+  const nano = decode(req);
+  assert.ok(nano.resource, "resource present");
+  assert.equal(nano.resource.mimeType, "application/json");
+  assert.ok(nano.resource.url, "resource.url present");
+  assert.ok(nano.accepted, "accepted present");
+  assert.equal(nano.accepted.amount, "9007199254740993"); // == signed value
+  assert.equal(nano.accepted.payTo, PROOF.to);
+  assert.equal(nano.accepted.maxTimeoutSeconds, 345600);
+  assert.equal(nano.accepted.extra.name, "GatewayWalletBatched");
+  // amount must equal the signed authorization value
+  assert.equal(req.paymentRequirements.amount, nano.payload.authorization.value);
+});
+
 test("asset defaults to canonical USDC for the network", () => {
   const req = buildSettlePayload(PROOF, { network: NETWORK });
   assert.equal(

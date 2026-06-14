@@ -154,7 +154,9 @@ export interface SettleRequest {
     network: string;
     scheme?: string;
     asset?: string;
+    amount?: string;
     payTo?: string;
+    maxTimeoutSeconds?: number;
     extra?: Record<string, unknown>;
   };
 }
@@ -206,52 +208,76 @@ function toBase64(s: string): string {
   );
 }
 
+/** Default validity window (seconds) advertised as maxTimeoutSeconds — 4 days. */
+const DEFAULT_MAX_TIMEOUT_SECONDS = 345600;
+
 /**
- * Reshape one flat wire proof into the Circle-native settle request:
- * flat → nested `payload.authorization.*`, `sig` → `payload.signature`,
- * `validAfter`/`validBefore` stringified, `value`/`nonce` carried verbatim,
- * `slice_id` moved into `paymentRequirements.extra.sliceId`, and base64-encoded.
+ * Reshape one flat wire proof into the Circle-native settle request, matching
+ * the full x402 V2 batched-facilitator schema (verified against a live settle):
+ *
+ * - flat → nested `payload.authorization.*`, `sig` → `payload.signature`
+ * - `validAfter`/`validBefore` stringified; `value`/`nonce` carried verbatim
+ * - `payload.resource` + `payload.accepted` — **both REQUIRED** by Circle's
+ *   facilitator (omitting them returns "Invalid request: ...resource: Required")
+ * - `accepted` / `paymentRequirements` carry `amount` (= signed value),
+ *   `maxTimeoutSeconds`, and the GatewayWalletBatched EIP-712 domain in `extra`
+ *   (needed to verify the signature; the server forwards this to Circle unchanged)
+ * - `slice_id` rides in `paymentRequirements.extra.sliceId` for idempotency
  *
  * Exported for callers who want the request without sending it (testing,
  * custom transports). Most callers should use `HashAnchor.settle()`.
  */
 export function buildSettlePayload(
   proof: SettleProof,
-  opts: { network: string; asset?: string }
+  opts: { network: string; asset?: string; resourceUrl?: string }
 ): SettleRequest {
+  const asset = opts.asset ?? USDC_BY_NETWORK[opts.network];
+  const amount = String(proof.value);
+  const domain = {
+    name: "GatewayWalletBatched",
+    version: "1",
+    verifyingContract: GATEWAY_BY_NETWORK[opts.network],
+  };
+  // The accepted payment requirement — Circle requires this inside the payload
+  // and it must mirror the offer the signature was produced against.
+  const accepted = {
+    scheme: "exact",
+    network: opts.network,
+    asset,
+    amount,
+    payTo: proof.to,
+    maxTimeoutSeconds: DEFAULT_MAX_TIMEOUT_SECONDS,
+    extra: domain,
+  };
   const nano = {
     x402Version: 2,
+    resource: {
+      url: opts.resourceUrl ?? "https://hashanchor.xid.network/v1/x402/settle",
+      description: "BoAT nanopayment slice",
+      mimeType: "application/json",
+    },
+    accepted,
     payload: {
       signature: proof.sig,
       authorization: {
         from: proof.from,
         to: proof.to,
-        value: String(proof.value),
+        value: amount,
         validAfter: String(proof.validAfter),
         validBefore: String(proof.validBefore),
         nonce: proof.nonce,
       },
     },
   };
-  // `extra` carries the EIP-712 GatewayWalletBatched signing domain — the
-  // facilitator needs name/version/verifyingContract to verify the signature
-  // (this passes through to Circle unchanged; the server does NOT rebuild it).
-  // Omitting it makes settle silently fail verification. sliceId rides along
-  // for client-side idempotency.
-  const extra: Record<string, unknown> = {
-    name: "GatewayWalletBatched",
-    version: "1",
-    verifyingContract: GATEWAY_BY_NETWORK[opts.network],
-  };
-  if (proof.slice_id !== undefined) {
-    extra.sliceId = proof.slice_id;
-  }
   const paymentRequirements: SettleRequest["paymentRequirements"] = {
     network: opts.network,
     scheme: "exact",
-    asset: opts.asset ?? USDC_BY_NETWORK[opts.network],
+    asset,
+    amount,
     payTo: proof.to,
-    extra,
+    maxTimeoutSeconds: DEFAULT_MAX_TIMEOUT_SECONDS,
+    extra:
+      proof.slice_id !== undefined ? { ...domain, sliceId: proof.slice_id } : domain,
   };
   return {
     x402Version: 2,
