@@ -65,6 +65,54 @@ const v = await client.verify(hash);
 console.log(v.verified, v.anchor?.txHash);
 ```
 
+### Settle x402 nanopayments (device-to-device)
+
+For machine-to-machine payments, HashAnchor exposes a **public, stateless x402
+facilitator** at `POST /v1/x402/settle` — it relays a signed payment to the Circle
+Gateway and returns the result. No API key, no private key on the server, no gas.
+
+A settlement worker takes the flat payment proofs that devices emit on the wire (e.g.
+a BLE 0xEE04 slice proof, forwarded over MQTT) and settles them in one call. The SDK
+owns the reshape into the Circle-native format — including the precision-critical bits
+(uint256 `value` and 32-byte `nonce` are kept as strings, never JS numbers; `v` is the
+last byte of the signature, 27/28) — so the device, the broker, and your worker carry
+the proof verbatim:
+
+```ts
+import { HashAnchor } from "@tlay/hashanchor-client";
+
+const ha = new HashAnchor(); // no API key needed for settle
+
+const results = await ha.settle({
+  sid: "stream-1",
+  batchIdx: 0,
+  network: "eip155:5042002", // Arc Testnet (carried from the device, not hardcoded)
+  proofs: [
+    {
+      sig: "0x…",            // "0x" + r||s||v (132 hex)
+      from: "0x…", to: "0x…",
+      value: "10",           // decimal µUSDC — string, always
+      validAfter: 1718200000,
+      validBefore: 1718203600,
+      nonce: "0x…",          // 0x + 64 hex
+      slice_id: 0,
+    },
+  ],
+});
+
+for (const r of results) {
+  if (r.success) console.log("settled", r.transaction);
+  // `nonce_already_used` is the idempotent rejection of an already-settled proof
+  // (expected under at-least-once delivery) — de-dup on (payer, nonce), don't alarm.
+  else console.warn(r.errorReason);
+}
+```
+
+Results are positionally aligned with `proofs`. A `success:false` result (including a
+single proof's transport fault) is returned, never thrown — one bad proof never sinks
+the batch. See the [settle envelope schema](./docs/settle-envelope.md) and the
+[EIP-712 Gateway-domain trap](./docs/eip712-domain-trap.md) before signing.
+
 ## API
 
 | Method | Auth | Description |
@@ -80,7 +128,13 @@ console.log(v.verified, v.anchor?.txHash);
 | `verify(hash)` | none | Server-side proof + on-chain anchor verification. |
 | `getReceipt(hash)` | none | Portable JSON receipt (`@context` + Merkle proof + anchor). |
 | `getChains()` | none | Supported anchoring chains. |
+| `settle(envelope)` | none | Settle a batch of x402 nanopayment proofs via the public facilitator. Returns one `SettleResult` per proof. |
+| `buildSettlePayload(proof, { network, asset? })` | — | **Offline** reshape of one flat proof into a Circle-native settle request (no network). |
 | `verifyReceiptProof(receipt)` | — | **Offline** Merkle-proof check (no network). |
+
+`settle()` returns `SettleResult[]` (never throws on a settlement outcome); only the
+authenticated methods (`anchor`, `submitHash`, `submitBatch`, `getStatus`,
+`batchStatus`, `getQuota`) require an API key — construct with `{ apiKey }` for those.
 
 All errors throw `HashAnchorError` with `.status` and `.body`.
 

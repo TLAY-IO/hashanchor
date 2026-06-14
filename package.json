@@ -32,6 +32,7 @@
   "files": ["dist", "README.md", "LICENSE", "NOTICE"],
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --test \"test/*.test.mjs\"",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build"
   },
