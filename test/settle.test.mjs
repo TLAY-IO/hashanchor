@@ -66,6 +66,24 @@ test("slice_id goes to paymentRequirements.extra, not authorization", () => {
   assert.equal(decode(req).payload.authorization.slice_id, undefined);
 });
 
+test("extra carries the GatewayWalletBatched signing domain", () => {
+  const req = buildSettlePayload(PROOF, { network: NETWORK });
+  // The facilitator needs the EIP-712 domain to verify the signature; omitting
+  // it makes settle silently fail. Arc shares the testnet gateway deployment.
+  assert.equal(req.paymentRequirements.extra.name, "GatewayWalletBatched");
+  assert.equal(req.paymentRequirements.extra.version, "1");
+  assert.equal(
+    req.paymentRequirements.extra.verifyingContract,
+    "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+  );
+  // Base mainnet uses the other gateway deployment.
+  const base = buildSettlePayload(PROOF, { network: "eip155:8453" });
+  assert.equal(
+    base.paymentRequirements.extra.verifyingContract,
+    "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+  );
+});
+
 test("asset defaults to canonical USDC for the network", () => {
   const req = buildSettlePayload(PROOF, { network: NETWORK });
   assert.equal(
