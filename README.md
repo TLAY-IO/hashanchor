@@ -1,7 +1,6 @@
 # HashAnchor Client SDK
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![npm](https://img.shields.io/npm/v/@tlay/hashanchor-client.svg)](https://www.npmjs.com/package/@tlay/hashanchor-client)
 
 Official JavaScript/TypeScript client SDK for **HashAnchor** — anchor data hashes to
 public blockchains and verify cryptographic inclusion receipts.
@@ -17,9 +16,15 @@ TLAY (commercial / self-hostable).
 
 ## Install
 
+Not yet published to npm. Install from this repository at a release tag:
+
 ```bash
-npm install @tlay/hashanchor-client
+npm install github:TLAY-IO/hashanchor#v1.0.0
 ```
+
+The package builds itself on install (`prepare` script), so no extra build step is
+needed. The package name is `@tlay/hashanchor-client`, so imports look the same as they
+will once it is published to npm.
 
 ## Quickstart
 
