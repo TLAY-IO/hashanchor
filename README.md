@@ -6,9 +6,11 @@ Official JavaScript/TypeScript client SDK for **HashAnchor** — anchor data has
 public blockchains and verify cryptographic inclusion receipts.
 
 HashAnchor batches your hashes into a Merkle tree, anchors the root on-chain, and
-issues a portable receipt that proves a hash existed at a point in time. This SDK is the
-thin client over the HashAnchor HTTP API; the anchoring service itself is operated by
-TLAY (commercial / self-hostable).
+issues a portable receipt that proves a hash existed at a point in time.
+
+This SDK and the public contracts in it are Apache-2.0. The multi-tenant HashAnchor
+server is proprietary and operated by TLAY — this repository does not contain a
+self-hostable server. `baseUrl` can target compatible managed deployments.
 
 > Part of the [TLAY](https://www.tlay.io) open-source stack — *the Embedded Trust Layer
 > for the Machine Economy.* See also [BoAT MER](https://github.com/TLAY-IO/boat-mer),
