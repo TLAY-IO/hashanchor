@@ -91,7 +91,15 @@ test("payload + requirements carry the Circle-required fields", () => {
   const req = buildSettlePayload(PROOF, { network: NETWORK });
   // top-level requirements
   assert.equal(req.paymentRequirements.amount, "9007199254740993");
-  assert.equal(req.paymentRequirements.maxTimeoutSeconds, 345600);
+  // 604900 = 7 days + 100 s. Circle rejects windows shorter than 7 days with
+  // `authorization_validity_too_short` (production evidence 2026-08-11: a ~4 day
+  // window was rejected three times). If this assertion fails because someone
+  // lowered the constant, that is the bug — do not "fix" the test.
+  assert.equal(req.paymentRequirements.maxTimeoutSeconds, 604900);
+  assert.ok(
+    req.paymentRequirements.maxTimeoutSeconds >= 604800,
+    "maxTimeoutSeconds must be at least Circle's 7-day minimum",
+  );
   // inside the base64 payload
   const nano = decode(req);
   assert.ok(nano.resource, "resource present");
@@ -100,7 +108,7 @@ test("payload + requirements carry the Circle-required fields", () => {
   assert.ok(nano.accepted, "accepted present");
   assert.equal(nano.accepted.amount, "9007199254740993"); // == signed value
   assert.equal(nano.accepted.payTo, PROOF.to);
-  assert.equal(nano.accepted.maxTimeoutSeconds, 345600);
+  assert.equal(nano.accepted.maxTimeoutSeconds, 604900); // see note above
   assert.equal(nano.accepted.extra.name, "GatewayWalletBatched");
   // amount must equal the signed authorization value
   assert.equal(req.paymentRequirements.amount, nano.payload.authorization.value);

@@ -1,7 +1,7 @@
 {
   "name": "@tlay/hashanchor-client",
-  "version": "1.0.0",
-  "description": "Official client SDK for HashAnchor — anchor data hashes to blockchains and verify inclusion receipts.",
+  "version": "1.0.1",
+  "description": "TypeScript SDK for verifiable data anchoring, portable Merkle receipts, and device-signed machine payments.",
   "type": "module",
   "license": "Apache-2.0",
   "homepage": "https://github.com/TLAY-IO/hashanchor",
@@ -19,7 +19,10 @@
     "anchoring",
     "merkle",
     "timestamping",
-    "proof-of-existence"
+    "proof-of-existence",
+    "machine-payments",
+    "stablecoin",
+    "x402"
   ],
   "exports": {
     ".": {

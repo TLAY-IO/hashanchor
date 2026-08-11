@@ -208,8 +208,23 @@ function toBase64(s: string): string {
   );
 }
 
-/** Default validity window (seconds) advertised as maxTimeoutSeconds — 4 days. */
-const DEFAULT_MAX_TIMEOUT_SECONDS = 345600;
+/**
+ * Default validity window (seconds) advertised as `maxTimeoutSeconds` — 7 days + 100 s.
+ *
+ * WHY THIS VALUE: Circle Gateway rejects an authorization whose validity window is
+ * shorter than 7 days with `authorization_validity_too_short`. Circle's own SDK
+ * (`GatewayEvmScheme`) uses 604900 = 7 days plus a 100 second buffer, so we match it.
+ * See https://developers.circle.com/gateway/nanopayments/references/sdk
+ *
+ * Do not lower this without re-checking the settlement provider's requirement. A short
+ * window fails at *settle* time, not at signing time, so nothing upstream reports an
+ * error — the payment simply never lands.
+ *
+ * NOTE: some Circle documentation pages still say 3 days. They are wrong in practice:
+ * production rejected a ~4 day window on 2026-08-11. Do not "correct" this back down
+ * on the strength of those pages.
+ */
+const DEFAULT_MAX_TIMEOUT_SECONDS = 604900;
 
 /**
  * Reshape one flat wire proof into the Circle-native settle request, matching
@@ -456,13 +471,12 @@ export class HashAnchor {
    * Gateway; HashAnchor holds no key, connects to no RPC, and pays no gas. The
    * returned array is positionally aligned with `envelope.proofs`.
    *
-   * A `success:false` result with `errorReason` (e.g. `nonce_already_used`,
-   * `insufficient_balance`) is a real settlement outcome, NOT a thrown error —
-   * `nonce_already_used` in particular is the idempotent rejection of a proof
-   * that already settled (expected under at-least-once MQTT delivery), so
-   * de-duplicate on `(payer, nonce)` rather than treating it as a failure.
-   * A network/transport fault on a single proof is captured as a
-   * `success:false` result too, so one bad proof never sinks the batch.
+   * A `success:false` result can be a provider rejection or a transport fault
+   * captured for that proof. Do not retry it blindly. In particular,
+   * `nonce_already_used` proves that the authorization nonce was consumed, but
+   * does not by itself identify which settlement consumed it; reconcile the
+   * network, asset, payer, payee, and amount before treating it as prior success.
+   * One failed proof never sinks the batch.
    */
   async settle(envelope: SettleEnvelope): Promise<SettleResult[]> {
     const results: SettleResult[] = [];
