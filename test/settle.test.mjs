@@ -188,3 +188,44 @@ test("authenticated methods throw without an API key", async () => {
   const ha = new HashAnchor();
   await assert.rejects(() => ha.submitHash("0x" + "00".repeat(32)), HashAnchorError);
 });
+
+// The EIP-712 signing domain is what a device actually signs over, so a wrong
+// `verifyingContract` does not fail loudly — the signature recovers to some
+// other address and the settlement is refused with no hint at the cause. This
+// table once carried Arc Testnet's address for Arc Mainnet because the grouping
+// was assumed to follow the chain family (which Circle's *domain number* does)
+// rather than testnet-vs-mainnet (which the *contract address* does).
+test("the batched signing domain is per-network and testnet never leaks into mainnet", () => {
+  const domainOf = (network) =>
+    JSON.parse(
+      Buffer.from(
+        buildSettlePayload(PROOF, { network }).paymentPayload,
+        "base64"
+      ).toString("utf-8")
+    ).accepted.extra;
+
+  const testnets = ["eip155:5042002", "eip155:84532"];
+  const mainnets = ["eip155:5042", "eip155:8453", "eip155:137"];
+
+  for (const n of [...testnets, ...mainnets]) {
+    const d = domainOf(n);
+    assert.equal(d.name, "GatewayWalletBatched");
+    assert.equal(d.version, "1");
+  }
+
+  const addr = (n) => domainOf(n).verifyingContract.toLowerCase();
+  const testnetAddrs = new Set(testnets.map(addr));
+  const mainnetAddrs = new Set(mainnets.map(addr));
+
+  assert.equal(testnetAddrs.size, 1, "every testnet shares one deployment");
+  assert.equal(mainnetAddrs.size, 1, "every mainnet shares one deployment");
+  assert.notEqual(
+    [...testnetAddrs][0],
+    [...mainnetAddrs][0],
+    "a testnet address on a mainnet would silently recover the wrong payer"
+  );
+
+  // Pinned to Circle's live GET /v1/x402/supported.
+  assert.equal([...mainnetAddrs][0], "0x77777777dcc4d5a8b6e418fd04d8997ef11000ee");
+  assert.equal([...testnetAddrs][0], "0x0077777d7eba4688bdef3e311b846f25870a19b9");
+});

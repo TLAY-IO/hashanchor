@@ -181,16 +181,24 @@ const USDC_BY_NETWORK: Record<string, string> = {
 
 /**
  * Circle Gateway (GatewayWallet) contract per network — the EIP-712
- * `verifyingContract` for the GatewayWalletBatched signing domain.
- * Mirrors the server config exactly. NOTE the grouping is by chain family,
- * not testnet/mainnet: Arc uses the same precompile-style address on BOTH its
- * testnet and mainnet (0x0077777d…), as does Base Sepolia; Base and Polygon
- * mainnet use the standard 0x77777777… deployment. (Verified against the
- * server's config.ts arc-mainnet entry — do not "fix" Arc Mainnet to 0x77777777.)
+ * `verifyingContract` of the `GatewayWalletBatched` signing domain.
+ *
+ * The grouping is by **testnet vs mainnet**, not by chain family: every testnet
+ * shares one deployment and every mainnet shares another. Two different things
+ * are easy to confuse here — Circle's *domain number* does go by chain family
+ * (a chain's testnet and mainnet share it), but the *contract address* does not.
+ * Conflating the two is how this table previously carried a testnet address for
+ * Arc Mainnet.
+ *
+ * Authoritative source: Circle's live `GET /v1/x402/supported`, which returns the
+ * `extra` block (name, version, verifyingContract) per network. Read it there
+ * rather than from a document — the mainnet address changed once already, and a
+ * stale address does not fail loudly: the signature simply recovers to the wrong
+ * payer and the settlement is refused with no hint at the cause.
  */
 const GATEWAY_BY_NETWORK: Record<string, string> = {
   "eip155:5042002": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9", // Arc Testnet
-  "eip155:5042": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9", // Arc Mainnet (same as Arc Testnet — Arc-specific)
+  "eip155:5042": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE", // Arc Mainnet
   "eip155:84532": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9", // Base Sepolia
   "eip155:8453": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE", // Base mainnet
   "eip155:137": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE", // Polygon mainnet
